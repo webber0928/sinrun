@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>新潤A18 實價登錄快速篩選系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-900">新潤A18 實價登錄快速篩選</h1>
+            <p class="text-gray-500 mt-1">整合 1~9 實價登錄 JSON 檔案歷史資料 (GitHub Pages 版)</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div id="status-card" class="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center">
+                <span class="text-blue-700 font-medium" id="load-status">資料載入中...</span>
+            </div>
+            <div class="bg-white shadow rounded-lg p-4 border border-gray-200">
+                <div class="text-sm text-gray-500">當前篩選筆數</div>
+                <div class="text-2xl font-bold text-gray-800" id="stat-count">0 <span class="text-sm font-normal text-gray-500">/ 共 <span id="stat-total">0</span> 筆</span></div>
+            </div>
+            <div class="bg-white shadow rounded-lg p-4 border border-gray-200">
+                <div class="text-sm text-gray-500">篩選平均單價</div>
+                <div class="text-2xl font-bold text-emerald-600" id="stat-avg-price">0 <span class="text-sm font-normal text-gray-500">萬/坪</span></div>
+            </div>
+        </div>
+
+        <div class="bg-white shadow rounded-lg p-6 mb-8 border border-gray-200">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">地址/房屋名稱搜尋</label>
+                    <input type="text" id="search-address" placeholder="例如：春德路、269號" 
+                           class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">交易樓層</label>
+                    <select id="filter-floor" class="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="">全部樓層</option>
+                    </select>
+                </div>
+
+                <div class="flex items-center md:pt-8">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="exclude-special" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4">
+                        <span class="text-sm font-medium text-gray-700">排除特殊交易 (親友員工關係戶)</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white shadow rounded-lg overflow-hidden border border-gray-200">
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 text-sm text-left">
+                    <thead class="bg-gray-50 text-gray-700 uppercase text-xs font-semibold">
+                        <tr>
+                            <th class="px-4 py-3">交易年月</th>
+                            <th class="px-4 py-3">地址</th>
+                            <th class="px-4 py-3">樓層 / 總樓層</th>
+                            <th class="px-4 py-3">每坪單價</th>
+                            <th class="px-4 py-3">總價 (萬)</th>
+                            <th class="px-4 py-3">總坪數 (坪)</th>
+                            <th class="px-4 py-3">車位形式/價格</th>
+                            <th class="px-4 py-3">備註</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body" class="divide-y divide-gray-200">
+                        </tbody>
+                </table>
+            </div>
+            <div id="no-data" class="hidden text-center py-12 text-gray-500">
+                沒有符合篩選條件的交易資料。
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let allTransactions = [];
+
+        // 取得當前 index.html 的絕對路徑目錄，用來精準定位同目錄下的 JSON 檔
+        function getBaseUrl() {
+            const href = window.location.href;
+            return href.substring(0, href.lastIndexOf('/') + 1);
+        }
+
+        // 初始化：讀取 9 個 JSON 檔案
+        async function loadAllData() {
+            const fileCount = 9;
+            const fetchPromises = [];
+            const baseUrl = getBaseUrl();
+
+            for (let i = 1; i <= fileCount; i++) {
+                // 使用絕對路徑拼接，防止 GitHub Pages 子路徑導向錯誤
+                const jsonUrl = `${baseUrl}新潤${i}.json`;
+                
+                fetchPromises.push(
+                    fetch(jsonUrl)
+                        .then(res => {
+                            if (!res.ok) throw new Error(`無法讀取 ${jsonUrl}`);
+                            return res.json();
+                        })
+                        .then(json => json.data || [])
+                        .catch(err => {
+                            console.error("載入錯誤:", err);
+                            return []; 
+                        })
+                );
+            }
+
+            try {
+                const results = await Promise.all(fetchPromises);
+                allTransactions = results.flat();
+                
+                // 依交易日期排序 (新 -> 舊)
+                allTransactions.sort((a, b) => b.transaction_date.localeCompare(a.transaction_date));
+
+                document.getElementById('load-status').innerText = `成功載入共 ${allTransactions.length} 筆交易資料`;
+                document.getElementById('status-card').className = "bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-center text-emerald-700";
+                
+                initFloorDropdown();
+                renderData(allTransactions);
+            } catch (error) {
+                document.getElementById('load-status').innerText = "資料載入失敗，請確認 JSON 檔案是否存在。";
+                document.getElementById('status-card').className = "bg-red-50 border border-red-200 rounded-lg p-4 flex items-center text-red-700";
+            }
+        }
+
+        // 初始化樓層下拉選單
+        function initFloorDropdown() {
+            const floorSelect = document.getElementById('filter-floor');
+            const floors = [...new Set(allTransactions.map(item => item.floor ? item.floor[0] : null).filter(Boolean))];
+            floors.sort((a, b) => a - b);
+
+            floors.forEach(floor => {
+                const opt = document.createElement('option');
+                opt.value = floor;
+                opt.innerText = `${floor} 樓`;
+                floorSelect.appendChild(opt);
+            });
+        }
+
+        // 核心：篩選與渲染資料
+        function filterAndRender() {
+            const searchAddress = document.getElementById('search-address').value.trim().toLowerCase();
+            const selectedFloor = document.getElementById('filter-floor').value;
+            const excludeSpecial = document.getElementById('exclude-special').checked;
+
+            const filtered = allTransactions.filter(item => {
+                const matchAddress = !searchAddress || 
+                    (item.address && item.address.toLowerCase().includes(searchAddress)) ||
+                    (item.object_title && item.object_title.toLowerCase().includes(searchAddress));
+
+                const matchFloor = !selectedFloor || (item.floor && item.floor[0] == selectedFloor);
+                const matchSpecial = !excludeSpecial || item.is_special_trade !== 1;
+
+                return matchAddress && matchFloor && matchSpecial;
+            });
+
+            renderData(filtered);
+        }
+
+        // 渲染表格與更新統計數據
+        function renderData(data) {
+            const tbody = document.getElementById('table-body');
+            const noData = document.getElementById('no-data');
+            tbody.innerHTML = '';
+
+            document.getElementById('stat-total').innerText = allTransactions.length;
+            document.getElementById('stat-count').innerText = data.length;
+
+            if (data.length === 0) {
+                noData.classList.remove('hidden');
+                document.getElementById('stat-avg-price').innerText = '0';
+                return;
+            } else {
+                noData.classList.add('hidden');
+            }
+
+            let totalUnitSum = 0;
+            let validUnitCount = 0;
+
+            data.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-gray-50 transition-colors";
+
+                const isSpecial = item.is_special_trade === 1;
+                const addressHTML = isSpecial 
+                    ? `<div>${item.address} <span class="inline-block bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded ml-1">特殊</span></div>`
+                    : `<div>${item.address}</div>`;
+
+                const parkingType = item.parking_type && item.parking_type[0] ? item.parking_type[0] : '無車位';
+                const parkingPrice = item.total_parking_price ? `${item.total_parking_price}萬` : '';
+                const parkingHTML = `<div>${parkingType}</div><div class="text-xs text-gray-400">${parkingPrice}</div>`;
+
+                if (item.unit_price_ping > 0) {
+                    totalUnitSum += item.unit_price_ping;
+                    validUnitCount++;
+                }
+
+                tr.innerHTML = `
+                    <td class="px-4 py-3 font-medium text-gray-600">${item.transaction_date || ''}</td>
+                    <td class="px-4 py-3">${addressHTML}<div class="text-xs text-gray-400">${item.object_title || ''}</div></td>
+                    <td class="px-4 py-3">${item.floor ? item.floor[0] : '-'}F / ${item.total_floor || '-'}F</td>
+                    <td class="px-4 py-3 font-semibold text-gray-900">${item.unit_price_ping ? item.unit_price_ping + ' 萬' : '-'}</td>
+                    <td class="px-4 py-3 font-medium text-blue-600">${item.total_price || '-'} 萬</td>
+                    <td class="px-4 py-3 text-gray-600">${item.total_area_ping || '-'} 坪</td>
+                    <td class="px-4 py-3">${parkingHTML}</td>
+                    <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate" title="${item.note || ''}">${item.note || '-'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            const avgUnitPrice = validUnitCount > 0 ? (totalUnitSum / validUnitCount).toFixed(2) : 0;
+            document.getElementById('stat-avg-price').innerText = avgUnitPrice;
+        }
+
+        document.getElementById('search-address').addEventListener('input', filterAndRender);
+        document.getElementById('filter-floor').addEventListener('change', filterAndRender);
+        document.getElementById('exclude-special').addEventListener('change', filterAndRender);
+
+        window.onload = loadAllData;
+    </script>
+</body>
+</html>
