@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>新潤A18 實價登錄完整母體數據庫 (穩定修復版)</title>
+    <title>新潤A18 實價登錄完整母體數據庫 (Bug Fixed)</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-800 min-h-screen p-4 md:p-8">
@@ -11,7 +11,7 @@
     <div class="max-w-7xl mx-auto">
         <header class="mb-6">
             <h1 class="text-3xl font-bold text-gray-900">新潤A18 實價登錄完整母體數據庫</h1>
-            <p class="text-gray-500 mt-1">完整呈現 844 筆歷史登錄紀錄 (除錯穩定版)</p>
+            <p class="text-gray-500 mt-1">完整呈現 844 筆歷史登錄紀錄 (穩定除錯版)</p>
         </header>
 
         <div id="status-card" class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-center">
@@ -77,7 +77,9 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div class="bg-gray-100 rounded-lg p-3 border border-gray-200 flex justify-between items-center px-6">
                 <span class="text-sm font-medium text-gray-500">當前顯示筆數 / 總原始數據</span>
-                <span class="text-lg font-bold text-gray-800" id="stat-count">0 / <span id="stat-total">0</span> 筆</span>
+                <span class="text-lg font-bold text-gray-800">
+                    <span id="stat-count">0</span> / <span id="stat-total">0</span> 筆
+                </span>
             </div>
             <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-200 flex justify-between items-center px-6">
                 <span class="text-sm font-medium text-emerald-700">當前顯示均價</span>
@@ -113,11 +115,10 @@
     <script>
         let allTransactions = [];
 
-        // 改良路徑獲取邏輯，相容 file:// 與 http://
         function getBaseUrl() {
             const href = window.location.href;
             if (href.startsWith('file://')) {
-                return "./"; // 本地端直接雙擊打開，使用相對路徑
+                return "./"; 
             }
             return href.substring(0, href.lastIndexOf('/') + 1);
         }
@@ -157,16 +158,18 @@
 
                 allTransactions.sort((a, b) => (b.transaction_date || '').localeCompare(a.transaction_date || ''));
 
-                document.getElementById('load-status').innerText = `成功載入共 ${allTransactions.length} 筆完整數據！`;
-                document.getElementById('status-card').className = "bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-6 flex items-center text-emerald-700";
+                const statusCard = document.getElementById('status-card');
+                const loadStatus = document.getElementById('load-status');
+                if (loadStatus) loadStatus.innerText = `成功載入共 ${allTransactions.length} 筆完整數據！`;
+                if (statusCard) statusCard.className = "bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-6 flex items-center text-emerald-700";
                 
                 calculateAnalysisTable();
                 initFloorDropdown();
                 renderData(allTransactions); 
             } catch (error) {
                 console.error(error);
-                document.getElementById('load-status').innerText = "大數據庫載入失敗。";
-                document.getElementById('status-card').className = "bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center text-red-700";
+                const loadStatus = document.getElementById('load-status');
+                if (loadStatus) loadStatus.innerText = "大數據庫載入失敗。";
             }
         }
 
@@ -179,6 +182,7 @@
             ];
 
             const tbody = document.getElementById('analysis-body');
+            if (!tbody) return;
             tbody.innerHTML = '';
 
             categories.forEach(cat => {
@@ -212,15 +216,16 @@
         }
 
         function quickFilterRoom(roomName) {
-            document.getElementById('filter-room').value = roomName;
+            const filterRoomOpt = document.getElementById('filter-room');
+            if (filterRoomOpt) filterRoomOpt.value = roomName;
             filterAndRender();
         }
 
         function initFloorDropdown() {
             const floorSelect = document.getElementById('filter-floor');
-            floorSelect.innerHTML = '<option value="">全部樓層</option>'; // 清空重置
+            if (!floorSelect) return;
+            floorSelect.innerHTML = '<option value="">全部樓層</option>'; 
             
-            // 嚴格抽取出有效的樓層號碼
             const floors = [...new Set(allTransactions.map(item => {
                 return (item.floor && Array.isArray(item.floor) && item.floor.length > 0) ? item.floor[0] : null;
             }).filter(Boolean))];
@@ -229,7 +234,7 @@
             
             floors.forEach(floor => {
                 const opt = document.createElement('option');
-                opt.value = floor.toString(); // 強制轉成字串對齊
+                opt.value = floor.toString(); 
                 opt.innerText = `${floor} 樓`;
                 floorSelect.appendChild(opt);
             });
@@ -238,7 +243,7 @@
         function filterAndRender() {
             try {
                 const searchAddress = document.getElementById('search-address').value.trim().toLowerCase();
-                const selectedFloor = document.getElementById('filter-floor').value.toString(); // 確保是字串
+                const selectedFloor = document.getElementById('filter-floor').value.toString(); 
                 const selectedRoom = document.getElementById('filter-room').value;
                 const excludeSpecial = document.getElementById('exclude-special').checked;
 
@@ -247,7 +252,6 @@
                         (item.address && item.address.toLowerCase().includes(searchAddress)) ||
                         (item.object_title && item.object_title.toLowerCase().includes(searchAddress));
 
-                    // 改良後的嚴格樓層比對邏輯 (轉字串防止弱型態判斷死掉)
                     let matchFloor = true;
                     if (selectedFloor !== "") {
                         const itemFloor = (item.floor && Array.isArray(item.floor) && item.floor.length > 0) ? item.floor[0].toString() : "";
@@ -269,17 +273,24 @@
         function renderData(data) {
             const tbody = document.getElementById('table-body');
             const noData = document.getElementById('no-data');
+            if (!tbody) return;
+            
             tbody.innerHTML = '';
 
-            document.getElementById('stat-total').innerText = allTransactions.length;
-            document.getElementById('stat-count').innerText = data.length;
+            // 安全獲取並更新統計元件，防止 ID 找不到噴錯
+            const statTotalEl = document.getElementById('stat-total');
+            const statCountEl = document.getElementById('stat-count');
+            const statAvgPriceEl = document.getElementById('stat-avg-price');
+
+            if (statTotalEl) statTotalEl.innerText = allTransactions.length;
+            if (statCountEl) statCountEl.innerText = data ? data.length : 0;
 
             if (!data || data.length === 0) {
-                noData.classList.remove('hidden');
-                document.getElementById('stat-avg-price').innerText = '0 萬/坪';
+                if (noData) noData.classList.remove('hidden');
+                if (statAvgPriceEl) statAvgPriceEl.innerText = '0 萬/坪';
                 return;
             } else {
-                noData.classList.add('hidden');
+                if (noData) noData.classList.add('hidden');
             }
 
             let totalUnitSum = 0;
@@ -326,7 +337,7 @@
             });
 
             const avgUnitPrice = validUnitCount > 0 ? (totalUnitSum / validUnitCount).toFixed(2) : 0;
-            document.getElementById('stat-avg-price').innerText = `${avgUnitPrice} 萬/坪`;
+            if (statAvgPriceEl) statAvgPriceEl.innerText = `${avgUnitPrice} 萬/坪`;
         }
 
         document.getElementById('search-address').addEventListener('input', filterAndRender);
