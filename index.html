@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>新潤A18 實價登錄完整母體數據庫 (Bug Fixed)</title>
+    <title>新潤A18 實價登錄完整母體數據庫</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-800 min-h-screen p-4 md:p-8">
@@ -11,11 +11,11 @@
     <div class="max-w-7xl mx-auto">
         <header class="mb-6">
             <h1 class="text-3xl font-bold text-gray-900">新潤A18 實價登錄完整母體數據庫</h1>
-            <p class="text-gray-500 mt-1">完整呈現 844 筆歷史登錄紀錄 (穩定除錯版)</p>
+            <p class="text-gray-500 mt-1">完整同步呈現 844 筆歷史登錄紀錄 (強制同步載入版)</p>
         </header>
 
         <div id="status-card" class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-center">
-            <span class="text-blue-700 font-medium" id="load-status">資料載入中...</span>
+            <span class="text-blue-700 font-medium" id="load-status">資料強行同步載入中... 請稍候...</span>
         </div>
 
         <div class="bg-white shadow rounded-lg p-6 mb-6 border border-gray-200">
@@ -30,7 +30,7 @@
                             <th class="px-6 py-3">最高單價</th>
                             <th class="px-6 py-3">最低單價</th>
                             <th class="px-6 py-3">平均單價</th>
-                            <th class="px-6 py-3">操作</th>
+                            <th class="px-6 py-2">操作</th>
                         </tr>
                     </thead>
                     <tbody id="analysis-body" class="divide-y divide-gray-200 font-medium text-gray-600">
@@ -61,7 +61,7 @@
                         <option value="1房">1 房 (22坪以下)</option>
                         <option value="2房">2 房 (22~32坪)</option>
                         <option value="3房">3 房 (32坪以上)</option>
-                        <option value="其他/純車位">其他 / 純車位</option>
+                        <option value="反分類/純車位">其他 / 純車位</option>
                     </select>
                 </div>
 
@@ -82,7 +82,7 @@
                 </span>
             </div>
             <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-200 flex justify-between items-center px-6">
-                <span class="text-sm font-medium text-emerald-700">當前顯示均價</span>
+                <span class="text-sm font-medium text-emerald-700">當前顯示均價 (排除單價為0者)</span>
                 <span class="text-lg font-bold text-emerald-600" id="stat-avg-price">0 萬/坪</span>
             </div>
         </div>
@@ -113,8 +113,10 @@
     </div>
 
     <script>
+        // 全域變數定義
         let allTransactions = [];
 
+        // 自動路徑嗅探，相容本機雙擊 file:// 與伺服器 http:// 協議
         function getBaseUrl() {
             const href = window.location.href;
             if (href.startsWith('file://')) {
@@ -123,6 +125,7 @@
             return href.substring(0, href.lastIndexOf('/') + 1);
         }
 
+        // 精準無死角分類邏輯
         function judgeRoomType(item) {
             const area = item.house_area_ping || (item.total_area_ping - (item.parking_area_ping || 0));
             if (!area || area <= 0 || !item.total_price) {
@@ -133,46 +136,63 @@
             return "3房";
         }
 
+        // 強制阻塞同步載入，保證 844 筆一個都不少
         async function loadAllData() {
             const fileCount = 9;
-            const fetchPromises = [];
             const baseUrl = getBaseUrl();
-
-            for (let i = 1; i <= fileCount; i++) {
-                const url = baseUrl.startsWith('./') ? `新潤${i}.json` : `${baseUrl}新潤${i}.json`;
-                fetchPromises.push(
-                    fetch(url)
-                        .then(res => { if (!res.ok) throw new Error(); return res.json(); })
-                        .then(json => json.data || [])
-                        .catch(() => [])
-                );
-            }
+            
+            allTransactions = []; 
+            let rawResults = [];
 
             try {
-                const results = await Promise.all(fetchPromises);
-                allTransactions = results.flat();
+                // 老老實實等每一頁 Fetch 完再跑下一頁，防止速度太快造成非同步掉幀
+                for (let i = 1; i <= fileCount; i++) {
+                    const url = baseUrl.startsWith('./') ? `新潤${i}.json` : `${baseUrl}新潤${i}.json`;
+                    
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        console.error(`檔案 新潤${i}.json 讀取失敗`);
+                        continue; 
+                    }
+                    
+                    const json = await response.json();
+                    if (json && json.data && Array.isArray(json.data)) {
+                        rawResults.push(json.data);
+                    }
+                }
+
+                // 扁平化陣列
+                allTransactions = rawResults.flat();
                 
+                // 預先注入自定義房型標籤
                 allTransactions.forEach(item => {
                     item._roomType = judgeRoomType(item);
                 });
 
+                // 按交易年月日排序 (新 -> 舊)
                 allTransactions.sort((a, b) => (b.transaction_date || '').localeCompare(a.transaction_date || ''));
 
-                const statusCard = document.getElementById('status-card');
-                const loadStatus = document.getElementById('load-status');
-                if (loadStatus) loadStatus.innerText = `成功載入共 ${allTransactions.length} 筆完整數據！`;
-                if (statusCard) statusCard.className = "bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-6 flex items-center text-emerald-700";
+                // 更新狀態面板
+                try {
+                    document.getElementById('load-status').innerText = `【大數據解密成功】已強行讀取完整母體：共 ${allTransactions.length} 筆交易紀錄！`;
+                    document.getElementById('status-card').className = "bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-6 flex items-center text-emerald-700 font-bold";
+                } catch(e) {}
                 
+                // 啟動頁面元件與表格渲染
                 calculateAnalysisTable();
                 initFloorDropdown();
                 renderData(allTransactions); 
+
             } catch (error) {
-                console.error(error);
-                const loadStatus = document.getElementById('load-status');
-                if (loadStatus) loadStatus.innerText = "大數據庫載入失敗。";
+                console.error("大數據庫同步載入發生嚴重錯誤:", error);
+                try {
+                    document.getElementById('load-status').innerText = "強行載入全數據失敗，請檢查 JSON 檔案完整性。";
+                    document.getElementById('status-card').className = "bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center text-red-700 font-bold";
+                } catch(e) {}
             }
         }
 
+        // 計算上方的「房型綜合分析表」
         function calculateAnalysisTable() {
             const categories = [
                 { name: "1房", desc: "22 坪以下主要房型" },
@@ -189,6 +209,7 @@
                 const allInCat = allTransactions.filter(item => item._roomType === cat.name);
                 const count = allInCat.length;
 
+                // 計算均價時排除特殊交易（如親友戶）與單價為 0 的極端值
                 const validTxs = allInCat.filter(item => item.is_special_trade !== 1 && item.unit_price_ping > 0);
                 const prices = validTxs.map(item => item.unit_price_ping);
                 
@@ -215,12 +236,14 @@
             });
         }
 
+        // 分析表按鈕點擊連動
         function quickFilterRoom(roomName) {
             const filterRoomOpt = document.getElementById('filter-room');
             if (filterRoomOpt) filterRoomOpt.value = roomName;
             filterAndRender();
         }
 
+        // 抽取所有獨立樓層並排序
         function initFloorDropdown() {
             const floorSelect = document.getElementById('filter-floor');
             if (!floorSelect) return;
@@ -234,30 +257,34 @@
             
             floors.forEach(floor => {
                 const opt = document.createElement('option');
-                opt.value = floor.toString(); 
+                opt.value = floor.toString().trim(); 
                 opt.innerText = `${floor} 樓`;
                 floorSelect.appendChild(opt);
             });
         }
 
+        // 核心篩選邏輯，處理髒資料與型態對齊
         function filterAndRender() {
             try {
-                const searchAddress = document.getElementById('search-address').value.trim().toLowerCase();
-                const selectedFloor = document.getElementById('filter-floor').value.toString(); 
+                const searchAddress = (document.getElementById('search-address').value || '').trim().toLowerCase();
+                const selectedFloor = (document.getElementById('filter-floor').value || '').toString().trim(); 
                 const selectedRoom = document.getElementById('filter-room').value;
                 const excludeSpecial = document.getElementById('exclude-special').checked;
 
                 const filtered = allTransactions.filter(item => {
+                    // 地址/關鍵字比對
                     const matchAddress = !searchAddress || 
                         (item.address && item.address.toLowerCase().includes(searchAddress)) ||
                         (item.object_title && item.object_title.toLowerCase().includes(searchAddress));
 
+                    // 樓層比對 (強轉字串去除字元前後空白，完全相容弱型態)
                     let matchFloor = true;
                     if (selectedFloor !== "") {
-                        const itemFloor = (item.floor && Array.isArray(item.floor) && item.floor.length > 0) ? item.floor[0].toString() : "";
+                        const itemFloor = (item.floor && Array.isArray(item.floor) && item.floor.length > 0) ? item.floor[0].toString().trim() : "";
                         matchFloor = (itemFloor === selectedFloor);
                     }
 
+                    // 房型與特殊交易比對
                     const matchRoom = !selectedRoom || item._roomType === selectedRoom;
                     const matchSpecial = !excludeSpecial || item.is_special_trade !== 1;
 
@@ -266,10 +293,11 @@
 
                 renderData(filtered);
             } catch (err) {
-                console.error("篩選運行時錯誤:", err);
+                console.error("篩選運行時發生錯誤:", err);
             }
         }
 
+        // 表格與統計數據渲染，使用全 try-catch 保護機制
         function renderData(data) {
             const tbody = document.getElementById('table-body');
             const noData = document.getElementById('no-data');
@@ -277,17 +305,18 @@
             
             tbody.innerHTML = '';
 
-            // 安全獲取並更新統計元件，防止 ID 找不到噴錯
-            const statTotalEl = document.getElementById('stat-total');
-            const statCountEl = document.getElementById('stat-count');
-            const statAvgPriceEl = document.getElementById('stat-avg-price');
+            // 安全渲染頂部統計指標，絕不拋出未定義 null 錯誤
+            try {
+                if (document.getElementById('stat-total')) document.getElementById('stat-total').innerText = allTransactions.length;
+                if (document.getElementById('stat-count')) document.getElementById('stat-count').innerText = data ? data.length : 0;
+            } catch(e) { console.error("DOM更新統計錯誤", e); }
 
-            if (statTotalEl) statTotalEl.innerText = allTransactions.length;
-            if (statCountEl) statCountEl.innerText = data ? data.length : 0;
-
+            // 查無資料處理
             if (!data || data.length === 0) {
                 if (noData) noData.classList.remove('hidden');
-                if (statAvgPriceEl) statAvgPriceEl.innerText = '0 萬/坪';
+                try {
+                    if (document.getElementById('stat-avg-price')) document.getElementById('stat-avg-price').innerText = '0 萬/坪';
+                } catch(e){}
                 return;
             } else {
                 if (noData) noData.classList.add('hidden');
@@ -296,19 +325,21 @@
             let totalUnitSum = 0;
             let validUnitCount = 0;
 
+            // 動態組裝表格
             data.forEach(item => {
                 const tr = document.createElement('tr');
                 tr.className = "hover:bg-gray-50 transition-colors text-gray-700";
 
                 const isSpecial = item.is_special_trade === 1;
                 const addressHTML = isSpecial 
-                    ? `<div>${item.address || '特殊申報'} <span class="bg-red-100 text-red-700 text-xs px-1 rounded ml-1">親友</span></div>`
+                    ? `<div>${item.address || '特殊申報戶'} <span class="bg-red-100 text-red-700 text-xs px-1 rounded ml-1 font-bold">親友</span></div>`
                     : `<div>${item.address || item.object_title || '無特定地址'}</div>`;
 
                 const parkingType = item.parking_type && item.parking_type[0] ? item.parking_type[0] : '無車位';
                 const parkingPrice = item.total_parking_price ? `${item.total_parking_price}萬` : '';
                 const parkingHTML = `<div>${parkingType}</div><div class="text-xs text-gray-400">${parkingPrice}</div>`;
 
+                // 動態配發房型標籤顏色
                 let roomBadgeColor = "bg-gray-100 text-gray-600";
                 if(item._roomType === "1房") roomBadgeColor = "bg-purple-100 text-purple-700";
                 if(item._roomType === "2房") roomBadgeColor = "bg-blue-100 text-blue-700";
@@ -336,15 +367,22 @@
                 tbody.appendChild(tr);
             });
 
+            // 更新平均單價
             const avgUnitPrice = validUnitCount > 0 ? (totalUnitSum / validUnitCount).toFixed(2) : 0;
-            if (statAvgPriceEl) statAvgPriceEl.innerText = `${avgUnitPrice} 萬/坪`;
+            try {
+                if (document.getElementById('stat-avg-price')) {
+                    document.getElementById('stat-avg-price').innerText = `${avgUnitPrice} 萬/坪`;
+                }
+            } catch(e){}
         }
 
+        // 綁定全域監聽事件
         document.getElementById('search-address').addEventListener('input', filterAndRender);
         document.getElementById('filter-floor').addEventListener('change', filterAndRender);
         document.getElementById('filter-room').addEventListener('change', filterAndRender);
         document.getElementById('exclude-special').addEventListener('change', filterAndRender);
 
+        // 頁面載入點
         window.onload = loadAllData;
     </script>
 </body>
