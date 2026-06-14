@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>新潤A18 實價登錄全資料解密系統 (共844筆)</title>
+    <title>新潤A18 實價登錄完整母體數據庫 (穩定修復版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-800 min-h-screen p-4 md:p-8">
@@ -11,7 +11,7 @@
     <div class="max-w-7xl mx-auto">
         <header class="mb-6">
             <h1 class="text-3xl font-bold text-gray-900">新潤A18 實價登錄完整母體數據庫</h1>
-            <p class="text-gray-500 mt-1">強制解密 1~9 JSON 檔案，完整呈現 844 筆歷史登錄紀錄</p>
+            <p class="text-gray-500 mt-1">完整呈現 844 筆歷史登錄紀錄 (除錯穩定版)</p>
         </header>
 
         <div id="status-card" class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-center">
@@ -26,10 +26,10 @@
                         <tr>
                             <th class="px-6 py-3">數據分類</th>
                             <th class="px-6 py-3">坪數區間與特性描述</th>
-                            <th class="px-6 py-3">總登記筆數 (含特殊交易)</th>
+                            <th class="px-6 py-3">總登記筆數</th>
                             <th class="px-6 py-3">最高單價</th>
                             <th class="px-6 py-3">最低單價</th>
-                            <th class="px-6 py-3">正常交易平均單價</th>
+                            <th class="px-6 py-3">平均單價</th>
                             <th class="px-6 py-3">操作</th>
                         </tr>
                     </thead>
@@ -37,7 +37,6 @@
                         </tbody>
                 </table>
             </div>
-            <p class="text-xs text-gray-400 mt-3">* 備註：「其他 / 純車位」包含實價登錄中單獨申報車位、建商特定交易、或是未申報建物主體坪數之原始盲點數據。點擊「快速篩選」可直接對齊下方列表。</p>
         </div>
 
         <div class="bg-white shadow rounded-lg p-6 mb-6 border border-gray-200">
@@ -58,7 +57,7 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">房型與數據分類</label>
                     <select id="filter-room" class="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="">全部顯示 (包含車位與未分類)</option>
+                        <option value="">全部顯示</option>
                         <option value="1房">1 房 (22坪以下)</option>
                         <option value="2房">2 房 (22~32坪)</option>
                         <option value="3房">3 房 (32坪以上)</option>
@@ -81,7 +80,7 @@
                 <span class="text-lg font-bold text-gray-800" id="stat-count">0 / <span id="stat-total">0</span> 筆</span>
             </div>
             <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-200 flex justify-between items-center px-6">
-                <span class="text-sm font-medium text-emerald-700">當前顯示均價 (排除單價為0者)</span>
+                <span class="text-sm font-medium text-emerald-700">當前顯示均價</span>
                 <span class="text-lg font-bold text-emerald-600" id="stat-avg-price">0 萬/坪</span>
             </div>
         </div>
@@ -114,20 +113,20 @@
     <script>
         let allTransactions = [];
 
+        // 改良路徑獲取邏輯，相容 file:// 與 http://
         function getBaseUrl() {
             const href = window.location.href;
+            if (href.startsWith('file://')) {
+                return "./"; // 本地端直接雙擊打開，使用相對路徑
+            }
             return href.substring(0, href.lastIndexOf('/') + 1);
         }
 
-        // 精準無死角分類邏輯
         function judgeRoomType(item) {
             const area = item.house_area_ping || (item.total_area_ping - (item.parking_area_ping || 0));
-            
-            // 如果房屋實坪小於等於 0，或是沒有總價資訊，極有可能是單獨申報車位的假數據
             if (!area || area <= 0 || !item.total_price) {
                 return "其他/純車位";
             }
-            
             if (area < 22) return "1房";
             if (area >= 22 && area < 32) return "2房";
             return "3房";
@@ -139,8 +138,9 @@
             const baseUrl = getBaseUrl();
 
             for (let i = 1; i <= fileCount; i++) {
+                const url = baseUrl.startsWith('./') ? `新潤${i}.json` : `${baseUrl}新潤${i}.json`;
                 fetchPromises.push(
-                    fetch(`${baseUrl}新潤${i}.json`)
+                    fetch(url)
                         .then(res => { if (!res.ok) throw new Error(); return res.json(); })
                         .then(json => json.data || [])
                         .catch(() => [])
@@ -151,44 +151,40 @@
                 const results = await Promise.all(fetchPromises);
                 allTransactions = results.flat();
                 
-                // 強制注入全資料房型分類
                 allTransactions.forEach(item => {
                     item._roomType = judgeRoomType(item);
                 });
 
-                // 照交易年月日排序
-                allTransactions.sort((a, b) => b.transaction_date.localeCompare(a.transaction_date));
+                allTransactions.sort((a, b) => (b.transaction_date || '').localeCompare(a.transaction_date || ''));
 
-                document.getElementById('load-status').innerText = `成功載入共 ${allTransactions.length} / 844 筆完整數據檔案！`;
+                document.getElementById('load-status').innerText = `成功載入共 ${allTransactions.length} 筆完整數據！`;
                 document.getElementById('status-card').className = "bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-6 flex items-center text-emerald-700";
                 
                 calculateAnalysisTable();
                 initFloorDropdown();
-                renderData(allTransactions); // 預設直接爆量顯示 844 筆全貌
+                renderData(allTransactions); 
             } catch (error) {
-                document.getElementById('load-status').innerText = "大數據庫載入失敗，請確認 1~9 個 JSON 檔案皆在同目錄中。";
+                console.error(error);
+                document.getElementById('load-status').innerText = "大數據庫載入失敗。";
                 document.getElementById('status-card').className = "bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center text-red-700";
             }
         }
 
-        // 重新設計統計表，把所有 844 筆完全拆解
         function calculateAnalysisTable() {
             const categories = [
                 { name: "1房", desc: "22 坪以下主要房型" },
                 { name: "2房", desc: "22 坪 (含) ~ 32 坪主流配比" },
-                { name: "3房", desc: "32 坪 (含) 以上家庭大格局" },
-                { name: "其他/純車位", desc: "純車位交易 / 建商特殊登記 / 盲點申報" }
+                { name: "3房", desc: "32 坪 (含) 以上大格局" },
+                { name: "其他/純車位", desc: "純車位交易 / 特殊登記" }
             ];
 
             const tbody = document.getElementById('analysis-body');
             tbody.innerHTML = '';
 
             categories.forEach(cat => {
-                // 撈出這類別的所有資料（包含特殊交易，用來算總筆數）
                 const allInCat = allTransactions.filter(item => item._roomType === cat.name);
                 const count = allInCat.length;
 
-                // 算均價時排除特殊交易與單價為 0 的欄位，更具參考價值
                 const validTxs = allInCat.filter(item => item.is_special_trade !== 1 && item.unit_price_ping > 0);
                 const prices = validTxs.map(item => item.unit_price_ping);
                 
@@ -222,35 +218,52 @@
 
         function initFloorDropdown() {
             const floorSelect = document.getElementById('filter-floor');
-            const floors = [...new Set(allTransactions.map(item => item.floor ? item.floor[0] : null).filter(Boolean))];
-            floors.sort((a, b) => a - b);
+            floorSelect.innerHTML = '<option value="">全部樓層</option>'; // 清空重置
+            
+            // 嚴格抽取出有效的樓層號碼
+            const floors = [...new Set(allTransactions.map(item => {
+                return (item.floor && Array.isArray(item.floor) && item.floor.length > 0) ? item.floor[0] : null;
+            }).filter(Boolean))];
+            
+            floors.sort((a, b) => Number(a) - Number(b));
+            
             floors.forEach(floor => {
                 const opt = document.createElement('option');
-                opt.value = floor;
+                opt.value = floor.toString(); // 強制轉成字串對齊
                 opt.innerText = `${floor} 樓`;
                 floorSelect.appendChild(opt);
             });
         }
 
         function filterAndRender() {
-            const searchAddress = document.getElementById('search-address').value.trim().toLowerCase();
-            const selectedFloor = document.getElementById('filter-floor').value;
-            const selectedRoom = document.getElementById('filter-room').value;
-            const excludeSpecial = document.getElementById('exclude-special').checked;
+            try {
+                const searchAddress = document.getElementById('search-address').value.trim().toLowerCase();
+                const selectedFloor = document.getElementById('filter-floor').value.toString(); // 確保是字串
+                const selectedRoom = document.getElementById('filter-room').value;
+                const excludeSpecial = document.getElementById('exclude-special').checked;
 
-            const filtered = allTransactions.filter(item => {
-                const matchAddress = !searchAddress || 
-                    (item.address && item.address.toLowerCase().includes(searchAddress)) ||
-                    (item.object_title && item.object_title.toLowerCase().includes(searchAddress));
+                const filtered = allTransactions.filter(item => {
+                    const matchAddress = !searchAddress || 
+                        (item.address && item.address.toLowerCase().includes(searchAddress)) ||
+                        (item.object_title && item.object_title.toLowerCase().includes(searchAddress));
 
-                const matchFloor = !selectedFloor || (item.floor && item.floor[0] == selectedFloor);
-                const matchRoom = !selectedRoom || item._roomType === selectedRoom;
-                const matchSpecial = !excludeSpecial || item.is_special_trade !== 1;
+                    // 改良後的嚴格樓層比對邏輯 (轉字串防止弱型態判斷死掉)
+                    let matchFloor = true;
+                    if (selectedFloor !== "") {
+                        const itemFloor = (item.floor && Array.isArray(item.floor) && item.floor.length > 0) ? item.floor[0].toString() : "";
+                        matchFloor = (itemFloor === selectedFloor);
+                    }
 
-                return matchAddress && matchFloor && matchRoom && matchSpecial;
-            });
+                    const matchRoom = !selectedRoom || item._roomType === selectedRoom;
+                    const matchSpecial = !excludeSpecial || item.is_special_trade !== 1;
 
-            renderData(filtered);
+                    return matchAddress && matchFloor && matchRoom && matchSpecial;
+                });
+
+                renderData(filtered);
+            } catch (err) {
+                console.error("篩選運行時錯誤:", err);
+            }
         }
 
         function renderData(data) {
@@ -261,7 +274,7 @@
             document.getElementById('stat-total').innerText = allTransactions.length;
             document.getElementById('stat-count').innerText = data.length;
 
-            if (data.length === 0) {
+            if (!data || data.length === 0) {
                 noData.classList.remove('hidden');
                 document.getElementById('stat-avg-price').innerText = '0 萬/坪';
                 return;
@@ -278,14 +291,13 @@
 
                 const isSpecial = item.is_special_trade === 1;
                 const addressHTML = isSpecial 
-                    ? `<div>${item.address || '未具名地址'} <span class="bg-red-100 text-red-700 text-xs px-1 rounded ml-1">親友</span></div>`
+                    ? `<div>${item.address || '特殊申報'} <span class="bg-red-100 text-red-700 text-xs px-1 rounded ml-1">親友</span></div>`
                     : `<div>${item.address || item.object_title || '無特定地址'}</div>`;
 
                 const parkingType = item.parking_type && item.parking_type[0] ? item.parking_type[0] : '無車位';
                 const parkingPrice = item.total_parking_price ? `${item.total_parking_price}萬` : '';
                 const parkingHTML = `<div>${parkingType}</div><div class="text-xs text-gray-400">${parkingPrice}</div>`;
 
-                // 標籤顏色
                 let roomBadgeColor = "bg-gray-100 text-gray-600";
                 if(item._roomType === "1房") roomBadgeColor = "bg-purple-100 text-purple-700";
                 if(item._roomType === "2房") roomBadgeColor = "bg-blue-100 text-blue-700";
@@ -298,12 +310,13 @@
                 }
 
                 const houseArea = item.house_area_ping || item.total_area_ping || 0;
+                const displayFloor = (item.floor && item.floor.length > 0) ? `${item.floor[0]}F` : '-';
 
                 tr.innerHTML = `
                     <td class="px-4 py-3 font-medium text-gray-500">${item.transaction_date || '未知'}</td>
                     <td class="px-4 py-3">${addressHTML}<div class="text-xs text-gray-400">${item.object_title || ''}</div></td>
                     <td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs font-bold ${roomBadgeColor}">${item._roomType}</span></td>
-                    <td class="px-4 py-3">${item.floor ? item.floor[0] : '-'}F / ${item.total_floor || '-'}F</td>
+                    <td class="px-4 py-3">${displayFloor} / ${item.total_floor || '-'}F</td>
                     <td class="px-4 py-3 font-bold text-gray-900">${item.unit_price_ping ? item.unit_price_ping + ' 萬' : '-'}</td>
                     <td class="px-4 py-3 font-semibold text-blue-600">${item.total_price || '-'} 萬</td>
                     <td class="px-4 py-3 font-medium">${houseArea ? houseArea + ' 坪' : '0 坪'}</td>
